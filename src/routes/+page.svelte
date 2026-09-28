@@ -3,10 +3,11 @@
   import Button from 'flowbite-svelte/Button.svelte'
   import {
     acknowledgeReminder, addAnnouncement, addSession, addSpeaker, addTerm, canRedo, canUndo, clearDuplicate,
-    deleteCue, desk, getDelay, ingestCue, moveCue, publishAnnouncement, redoDesk, sendReminder, setActiveCue,
-    setCueStatus, setFontScale, setLiveSimulation, setOnline, speakerName, termTarget, undoDesk, updateCue,
-    updateSession, updateSpeaker, updateTerm
+    deleteCue, desk, getDelay, ingestCue, moveCue, openSheet, publishAnnouncement, redoDesk, sendReminder,
+    setActiveCue, setCueStatus, setFontScale, setLiveSimulation, setOnline, speakerName, stageText, termTarget,
+    undoDesk, updateCue, updateSession, updateSpeaker, updateTerm
   } from '$lib/store'
+  import ReviewPanel from '$lib/ReviewPanel.svelte'
   import type { Announcement, Cue, Session, TabId, Term } from '$lib/types'
 
   const liveLines = [
@@ -39,6 +40,8 @@
   $: activeSpeaker = $desk.speakers.find(item => item.id === activeCue?.speakerId)
   $: activeTerms = $desk.terms.filter(item => item.speakerId === activeCue?.speakerId || activeCue?.tags.includes(item.target))
   $: unreadReminders = $desk.reminders.filter(item => !item.acknowledged)
+  $: activeReview = openSheet($desk)
+  $: reviewPendingCount = activeReview ? activeReview.items.filter(item => item.state === 'pending').length : 0
 
   onMount(() => {
     if (typeof navigator !== 'undefined') setOnline(navigator.onLine)
@@ -128,6 +131,7 @@
     if (event.key.toLowerCase() === 'c') { event.preventDefault(); confirmActive() }
     if (event.key.toLowerCase() === 'n') { event.preventDefault(); manualInput?.focus(); flash('手工录入已获焦，输入后按 Ctrl + Enter 提交。') }
     if (event.key.toLowerCase() === 't' && activeTerms[0]) { event.preventDefault(); sendTermReminder(activeTerms[0].id) }
+    if (event.key.toLowerCase() === 'q') { event.preventDefault(); tab = 'qa' }
     if (event.key === '?') { event.preventDefault(); showHelp = true }
     if (event.key === '+' || event.key === '=') setFontScale($desk.fontScale + 5)
     if (event.key === '-') setFontScale($desk.fontScale - 5)
@@ -146,11 +150,12 @@
         <div><strong class="block tracking-tight">会议同传提示台</strong><span class="block text-[10px] uppercase tracking-[.16em] text-slate-400">Live Interpreter Cue Desk</span></div>
       </div>
       <nav class="order-3 flex w-full gap-1 overflow-x-auto rounded-xl bg-slate-800/80 p-1 lg:order-none lg:w-auto" aria-label="工作区">
-        {#each [['live','现场传译'],['backstage','后台准备'],['terms','术语与通知'],['offline','离线暂存']] as item}
+        {#each [['live','现场传译'],['backstage','后台准备'],['terms','术语与通知'],['offline','离线暂存'],['qa','质量抽检']] as item}
           <button class="focus-ring whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold transition {tab === item[0] ? 'bg-white text-ink shadow' : 'text-slate-300 hover:bg-slate-700'}" aria-current={tab === item[0] ? 'page' : undefined} on:click={() => tab = item[0] as TabId}>
             {item[1]}
             {#if item[0] === 'live' && pendingCount}<span class="ml-2 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] text-white">{pendingCount}</span>{/if}
             {#if item[0] === 'offline' && offlineCount}<span class="ml-2 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] text-white">{offlineCount}</span>{/if}
+            {#if item[0] === 'qa' && reviewPendingCount}<span class="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-[10px] text-white">{reviewPendingCount}</span>{/if}
           </button>
         {/each}
       </nav>
@@ -199,7 +204,8 @@
               {#each $desk.cues.filter(item => item.status === 'confirmed').slice(-2) as cue}
                 <div class="rounded-xl bg-white/10 p-3">
                   <div class="mb-1 flex justify-between text-[10px] text-teal-200"><span>{speakerName($desk, cue.speakerId)}</span><span>{formatTime(cue.receivedAt)}</span></div>
-                  <p class="text-base leading-relaxed lg:text-lg">{cue.text}</p>
+                  <p class="text-base leading-relaxed lg:text-lg">{stageText(cue)}</p>
+                  {#if cue.revisedText}<p class="mt-1 text-[10px] font-bold text-amber-200">已采用抽检修正稿 · 原稿在质检单可回看</p>{/if}
                 </div>
               {/each}
               {#if !$desk.cues.some(item => item.status === 'confirmed') && !$desk.announcements.some(item => item.visibleOnStage)}
@@ -226,8 +232,11 @@
                         <span class="rounded-md px-2 py-1 {cue.status === 'confirmed' ? 'bg-emerald-100 text-emerald-800' : cue.status === 'followup' ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-800'}">{statusLabel(cue.status)}</span>
                         {#if cue.offline}<span class="rounded-md bg-amber-100 px-2 py-1 text-amber-900">离线暂存</span>{/if}
                         {#if cue.manual}<span class="rounded-md bg-slate-100 px-2 py-1 text-slate-600">手工</span>{/if}
+                        {#if cue.followupText}<span class="rounded-md bg-amber-100 px-2 py-1 text-amber-900">有补译</span>{/if}
+                        {#if cue.revisedText}<span class="rounded-md bg-teal-100 px-2 py-1 text-teal-800">已返修</span>{/if}
                       </div>
-                      <p class="text-sm leading-6 lg:text-base">{cue.text}</p>
+                      <p class="text-sm leading-6 lg:text-base {cue.revisedText ? 'text-slate-400 line-through decoration-slate-300' : ''}">{cue.text}</p>
+                      {#if cue.revisedText}<p class="mt-1 rounded-lg bg-teal-50 px-3 py-2 text-sm font-bold leading-6 text-teal-900"><strong class="text-[10px] align-middle">舞台修正稿：</strong>{cue.revisedText}</p>{/if}
                       {#if cue.duplicateOf}
                         <div class="mt-2 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
                           <span><strong>疑似重复：</strong>与第 {$desk.cues.findIndex(item => item.id === cue.duplicateOf) + 1} 条高度相似</span>
@@ -373,6 +382,10 @@
         </section>
       </div>
     {/if}
+
+    {#if tab === 'qa'}
+      <ReviewPanel />
+    {/if}
   </main>
 
   <footer class="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-3 px-4 pb-6 text-[11px] text-slate-500 lg:px-6"><span>本机自动保存 · 最近更新 {new Date($desk.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}</span><span>后台准备内容与现场可见内容严格分离</span><div class="flex gap-2"><button class="font-bold underline disabled:opacity-40" disabled={!canUndo()} on:click={undoDesk}>撤销</button><button class="font-bold underline disabled:opacity-40" disabled={!canRedo()} on:click={redoDesk}>重做</button></div></footer>
@@ -383,7 +396,7 @@
     <div class="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="shortcut-title" on:click|stopPropagation on:keydown|stopPropagation>
       <div class="flex items-start justify-between"><div><span class="text-[10px] font-black uppercase tracking-[.16em] text-teal-700">Keyboard First</span><h2 id="shortcut-title" class="mt-1 text-xl font-black">键盘操作</h2></div><button class="rounded-lg px-2 py-1 text-xl" aria-label="关闭" on:click={() => showHelp = false}>×</button></div>
       <div class="mt-4 grid gap-2 sm:grid-cols-2">
-        {#each [['J / ↓','下一条队列'],['K / ↑','上一条队列'],['C','确认已传并前进'],['N','聚焦手工录入'],['T','发送当前高优先术语'],['+ / −','调整界面字号'],['Ctrl + Z','撤销'],['Ctrl + Shift + Z','重做']] as shortcut}
+        {#each [['J / ↓','下一条队列'],['K / ↑','上一条队列'],['C','确认已传并前进'],['N','聚焦手工录入'],['T','发送当前高优先术语'],['Q','打开播出质量抽检'],['+ / −','调整界面字号'],['Ctrl + Z','撤销'],['Ctrl + Shift + Z','重做']] as shortcut}
           <div class="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2"><kbd class="rounded-md border bg-white px-2 py-1 text-xs font-black">{shortcut[0]}</kbd><span class="text-xs text-slate-600">{shortcut[1]}</span></div>
         {/each}
       </div>

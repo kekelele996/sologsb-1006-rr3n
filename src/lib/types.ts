@@ -1,5 +1,7 @@
 export type CueStatus = 'pending' | 'confirmed' | 'followup'
-export type TabId = 'live' | 'backstage' | 'terms' | 'offline'
+export type TabId = 'live' | 'backstage' | 'terms' | 'offline' | 'qa'
+export type IssueType = 'omission' | 'terminology' | 'number' | 'expression'
+export type ReviewItemState = 'pending' | 'ok' | 'issue'
 
 export interface Speaker {
   id: string
@@ -48,6 +50,41 @@ export interface Cue {
   duplicateOf: string | null
   followupText: string
   tags: string[]
+  // 抽检返修：舞台改用修正稿，text 始终保留原稿
+  revisedText: string
+}
+
+export interface ReviewItem {
+  id: string
+  cueId: string
+  speakerId: string
+  // 建单时的原文快照，原稿随时可回看
+  originalText: string
+  receivedAt: number
+  state: ReviewItemState
+  issues: IssueType[]
+  score: number
+  revision: string
+  reason: string
+  reviewedAt: string
+}
+
+export interface ReviewSheet {
+  id: string
+  title: string
+  sessionId: string
+  speakerIds: string[]
+  createdAt: string
+  finishedAt: string | null
+  items: ReviewItem[]
+}
+
+export interface SpeakerReviewStats {
+  speakerId: string
+  total: number
+  problemCount: number
+  issueCounts: Record<IssueType, number>
+  averageScore: number
 }
 
 export interface Reminder {
@@ -66,6 +103,7 @@ export interface DeskState {
   announcements: Announcement[]
   cues: Cue[]
   reminders: Reminder[]
+  reviewSheets: ReviewSheet[]
   activeCueId: string
   fontScale: number
   online: boolean

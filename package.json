@@ -7,7 +7,10 @@
     "dev": "vite dev --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test:unit": "node e2e-store.mjs",
+    "test:ui": "node e2e-ui.mjs",
+    "test": "npm run test:unit && npm run test:ui"
   },
   "dependencies": {
     "@sveltejs/adapter-static": "3.0.10",
@@ -18,6 +21,7 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "5.1.1",
     "autoprefixer": "10.4.21",
+    "jsdom": "^29.1.1",
     "postcss": "8.5.6",
     "svelte-check": "4.3.2",
     "tailwindcss": "3.4.17",
