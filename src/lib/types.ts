@@ -1,5 +1,6 @@
 export type CueStatus = 'pending' | 'confirmed' | 'followup'
-export type TabId = 'live' | 'backstage' | 'terms' | 'offline'
+export type TabId = 'live' | 'qa' | 'backstage' | 'terms' | 'offline'
+export type InspectionIssue = 'omission' | 'terminology' | 'number' | 'expression'
 
 export interface Speaker {
   id: string
@@ -40,6 +41,8 @@ export interface Cue {
   id: string
   speakerId: string
   text: string
+  originalText: string
+  revised: boolean
   receivedAt: number
   status: CueStatus
   manual: boolean
@@ -59,6 +62,26 @@ export interface Reminder {
   acknowledged: boolean
 }
 
+export interface InspectionItem {
+  cueId: string
+  speakerId: string
+  score: number
+  issueTypes: InspectionIssue[]
+  revision: string
+  reason: string
+  checked: boolean
+  hasIssue: boolean
+  updatedAt: number
+}
+
+export interface InspectionSheet {
+  id: string
+  sessionTitle: string
+  createdAt: number
+  finishedAt: number | null
+  items: InspectionItem[]
+}
+
 export interface DeskState {
   speakers: Speaker[]
   sessions: Session[]
@@ -66,6 +89,7 @@ export interface DeskState {
   announcements: Announcement[]
   cues: Cue[]
   reminders: Reminder[]
+  inspectionSheets: InspectionSheet[]
   activeCueId: string
   fontScale: number
   online: boolean

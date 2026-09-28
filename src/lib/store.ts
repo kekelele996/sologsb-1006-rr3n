@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store'
-import type { Announcement, Cue, CueStatus, DeskState, Reminder, Session, Speaker, Term } from './types'
+import type { Announcement, Cue, CueStatus, DeskState, InspectionIssue, InspectionItem, InspectionSheet, Reminder, Session, Speaker, Term } from './types'
 
 const STORAGE_KEY = 'conference-cue-desk-v1'
 const speakers: Speaker[] = [
@@ -24,15 +24,15 @@ const terms: Term[] = [
 function initialCues(): Cue[] {
   const now = Date.now()
   return [
-    { id: 'cue-101', speakerId: 'sp-1', text: 'The urban heat island effect is not evenly distributed across a city.', receivedAt: now - 36000, status: 'confirmed', manual: false, offline: false, delaySeconds: 4, duplicateOf: null, followupText: '', tags: ['城市热岛'] },
-    { id: 'cue-102', speakerId: 'sp-1', text: 'Neighborhoods with less tree canopy can be several degrees warmer at night.', receivedAt: now - 19000, status: 'confirmed', manual: false, offline: false, delaySeconds: 6, duplicateOf: null, followupText: '补译：“夜间温差可达数摄氏度。”', tags: ['树冠覆盖率'] },
-    { id: 'cue-103', speakerId: 'sp-1', text: 'Our resilience strategy links cooling corridors with public health investments.', receivedAt: now - 9000, status: 'pending', manual: false, offline: false, delaySeconds: 11, duplicateOf: null, followupText: '', tags: ['韧性', '协同效益'] },
-    { id: 'cue-104', speakerId: 'sp-1', text: 'That data also reveals health equity gaps between districts.', receivedAt: now - 2500, status: 'pending', manual: false, offline: false, delaySeconds: 4, duplicateOf: null, followupText: '', tags: ['健康公平'] }
+    { id: 'cue-101', speakerId: 'sp-1', text: 'The urban heat island effect is not evenly distributed across a city.', originalText: '', revised: false, receivedAt: now - 36000, status: 'confirmed', manual: false, offline: false, delaySeconds: 4, duplicateOf: null, followupText: '', tags: ['城市热岛'] },
+    { id: 'cue-102', speakerId: 'sp-1', text: 'Neighborhoods with less tree canopy can be several degrees warmer at night.', originalText: '', revised: false, receivedAt: now - 19000, status: 'confirmed', manual: false, offline: false, delaySeconds: 6, duplicateOf: null, followupText: '补译：“夜间温差可达数摄氏度。”', tags: ['树冠覆盖率'] },
+    { id: 'cue-103', speakerId: 'sp-1', text: 'Our resilience strategy links cooling corridors with public health investments.', originalText: '', revised: false, receivedAt: now - 9000, status: 'pending', manual: false, offline: false, delaySeconds: 11, duplicateOf: null, followupText: '', tags: ['韧性', '协同效益'] },
+    { id: 'cue-104', speakerId: 'sp-1', text: 'That data also reveals health equity gaps between districts.', originalText: '', revised: false, receivedAt: now - 2500, status: 'pending', manual: false, offline: false, delaySeconds: 4, duplicateOf: null, followupText: '', tags: ['健康公平'] }
   ]
 }
 function demoState(): DeskState {
   return {
-    speakers, sessions, terms, cues: initialCues(), reminders: [], activeCueId: 'cue-103', fontScale: 100,
+    speakers, sessions, terms, cues: initialCues(), reminders: [], inspectionSheets: [], activeCueId: 'cue-103', fontScale: 100,
     announcements: [
       { id: 'ann-1', level: 'info', text: '十点整有消防联动测试，请提醒会场人员保持镇定。', visibleOnStage: false, createdAt: new Date().toISOString() },
       { id: 'ann-2', level: 'urgent', text: '请下一位发言人提前到侧台候场。', visibleOnStage: false, createdAt: new Date().toISOString() }
@@ -41,11 +41,19 @@ function demoState(): DeskState {
   }
 }
 function clone<T>(value: T): T { return structuredClone(value) }
+function migrate(raw: DeskState): DeskState {
+  raw.cues?.forEach(cue => {
+    if (cue.originalText === undefined) cue.originalText = ''
+    if (cue.revised === undefined) cue.revised = false
+  })
+  if (!raw.inspectionSheets) raw.inspectionSheets = []
+  return raw
+}
 function loadState(): DeskState {
   if (typeof localStorage === 'undefined') return demoState()
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
-    return saved ? { ...demoState(), ...JSON.parse(saved), online: navigator.onLine } : demoState()
+    return saved ? migrate({ ...demoState(), ...JSON.parse(saved), online: navigator.onLine }) : demoState()
   } catch { return demoState() }
 }
 const history: DeskState[] = []
@@ -130,7 +138,7 @@ export function ingestCue(text: string, options: { manual?: boolean; speakerId?:
     const speakerId = options.speakerId || state.sessions.find(item => item.status === 'live')?.speakerId || state.speakers[0]?.id || ''
     const receivedAt = options.receivedAt || Date.now()
     const cue: Cue = {
-      id: `cue-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, speakerId, text: trimmed, receivedAt,
+      id: `cue-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, speakerId, text: trimmed, originalText: '', revised: false, receivedAt,
       status: 'pending', manual: Boolean(options.manual), offline: !state.online, delaySeconds: Math.max(0, Math.round((Date.now() - receivedAt) / 1000)),
       duplicateOf: duplicate?.id || null, followupText: '', tags: detectTerms(trimmed, state.terms)
     }
@@ -150,8 +158,115 @@ export function sendReminder(termId: string, cueId: string) {
 }
 export function acknowledgeReminder(id: string) { commit(state => { const item = state.reminders.find(row => row.id === id); if (item) item.acknowledged = true }) }
 
+export function getOpenSheet(state: DeskState): InspectionSheet | undefined {
+  return state.inspectionSheets.find(sheet => sheet.finishedAt === null)
+}
+export function inspectedCueIds(state: DeskState): Set<string> {
+  return new Set(state.inspectionSheets.flatMap(sheet => sheet.items.map(item => item.cueId)))
+}
+export function createInspectionSheet(): string | null {
+  const state = get(desk)
+  if (getOpenSheet(state)) return null
+  const taken = inspectedCueIds(state)
+  const cues = state.cues.filter(cue => cue.status === 'confirmed' && !taken.has(cue.id))
+  if (!cues.length) return null
+  const live = state.sessions.find(session => session.status === 'live')
+  const sheetId = `qa-${Date.now()}`
+  commit(next => {
+    next.inspectionSheets.unshift({
+      id: sheetId,
+      sessionTitle: live ? live.title : '本场口译',
+      createdAt: Date.now(),
+      finishedAt: null,
+      items: cues.map(cue => ({
+        cueId: cue.id, speakerId: cue.speakerId, score: 0, issueTypes: [], revision: '', reason: '',
+        checked: false, hasIssue: false, updatedAt: 0
+      }))
+    })
+  })
+  return sheetId
+}
+export interface InspectionItemInput {
+  score: number
+  issueTypes: InspectionIssue[]
+  revision: string
+  reason: string
+}
+/** 保存一段抽检结果；有问题时把修正稿切换到舞台，原稿保留在段落上可回看。返回 false 表示校验未通过。 */
+export function saveInspectionItem(sheetId: string, cueId: string, input: InspectionItemInput): boolean {
+  const score = Math.round(input.score)
+  const issueTypes = Array.from(new Set(input.issueTypes))
+  const hasIssue = issueTypes.length > 0
+  const revision = input.revision.trim()
+  const reason = input.reason.trim()
+  if (score < 1 || score > 5) return false
+  if (hasIssue && (!revision || !reason)) return false
+  let ok = false
+  commit(state => {
+    const sheet = state.inspectionSheets.find(row => row.id === sheetId)
+    const item = sheet?.items.find(row => row.cueId === cueId)
+    const cue = state.cues.find(row => row.id === cueId)
+    if (!sheet || !item || !cue) return
+    if (hasIssue) {
+      if (!cue.revised) cue.originalText = cue.text
+      cue.text = revision
+      cue.revised = true
+    } else if (cue.revised && cue.originalText) {
+      cue.text = cue.originalText
+      cue.originalText = ''
+      cue.revised = false
+    }
+    item.score = score
+    item.issueTypes = issueTypes
+    item.revision = hasIssue ? revision : ''
+    item.reason = hasIssue ? reason : ''
+    item.hasIssue = hasIssue
+    item.checked = true
+    item.updatedAt = Date.now()
+    ok = true
+  })
+  return ok
+}
+export function finishInspectionSheet(sheetId: string): boolean {
+  const state = get(desk)
+  const sheet = state.inspectionSheets.find(row => row.id === sheetId)
+  if (!sheet || sheet.finishedAt !== null || !sheet.items.length || sheet.items.some(item => !item.checked)) return false
+  commit(next => { const target = next.inspectionSheets.find(row => row.id === sheetId); if (target) target.finishedAt = Date.now() })
+  return true
+}
+export function reopenInspectionSheet(sheetId: string) {
+  commit(state => {
+    if (getOpenSheet(state)) return
+    const sheet = state.inspectionSheets.find(row => row.id === sheetId)
+    if (sheet) sheet.finishedAt = null
+  })
+}
+export interface SpeakerInspectionStat {
+  speakerId: string
+  inspected: number
+  issues: number
+  average: number
+}
+export function inspectionSummary(sheet: InspectionSheet): SpeakerInspectionStat[] {
+  const groups = new Map<string, InspectionItem[]>()
+  sheet.items.filter(item => item.checked).forEach(item => {
+    const list = groups.get(item.speakerId) || []
+    list.push(item)
+    groups.set(item.speakerId, list)
+  })
+  return Array.from(groups.entries()).map(([speakerId, items]) => ({
+    speakerId,
+    inspected: items.length,
+    issues: items.filter(item => item.hasIssue).length,
+    average: Math.round((items.reduce((sum, item) => sum + item.score, 0) / items.length) * 10) / 10
+  }))
+}
+
 export function getDelay(cue: Cue, now = Date.now()): number { return Math.max(cue.delaySeconds, Math.round((now - cue.receivedAt) / 1000)) }
 export function speakerName(state: DeskState, id: string): string { return state.speakers.find(item => item.id === id)?.name || '未指定' }
+export function formatIssueType(type: InspectionIssue): string {
+  return ({ omission: '漏译', terminology: '术语', number: '数字', expression: '表达' })[type]
+}
 export function termTarget(state: DeskState, id: string): string { return state.terms.find(item => item.id === id)?.target || '' }
 function detectTerms(text: string, terms: Term[]): string[] {
   const lower = text.toLowerCase()

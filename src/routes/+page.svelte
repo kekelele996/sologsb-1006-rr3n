@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import Button from 'flowbite-svelte/Button.svelte'
+  import InspectionDesk from '$lib/InspectionDesk.svelte'
   import {
     acknowledgeReminder, addAnnouncement, addSession, addSpeaker, addTerm, canRedo, canUndo, clearDuplicate,
-    deleteCue, desk, getDelay, ingestCue, moveCue, publishAnnouncement, redoDesk, sendReminder, setActiveCue,
-    setCueStatus, setFontScale, setLiveSimulation, setOnline, speakerName, termTarget, undoDesk, updateCue,
-    updateSession, updateSpeaker, updateTerm
+    deleteCue, desk, getDelay, getOpenSheet, ingestCue, inspectedCueIds, moveCue, publishAnnouncement, redoDesk,
+    sendReminder, setActiveCue, setCueStatus, setFontScale, setLiveSimulation, setOnline, speakerName, termTarget,
+    undoDesk, updateCue, updateSession, updateSpeaker, updateTerm
   } from '$lib/store'
   import type { Announcement, Cue, Session, TabId, Term } from '$lib/types'
 
@@ -39,6 +40,9 @@
   $: activeSpeaker = $desk.speakers.find(item => item.id === activeCue?.speakerId)
   $: activeTerms = $desk.terms.filter(item => item.speakerId === activeCue?.speakerId || activeCue?.tags.includes(item.target))
   $: unreadReminders = $desk.reminders.filter(item => !item.acknowledged)
+  $: openSheet = getOpenSheet($desk)
+  $: sheetRemaining = openSheet ? openSheet.items.filter(item => !item.checked).length : 0
+  $: inspectedIds = inspectedCueIds($desk)
 
   onMount(() => {
     if (typeof navigator !== 'undefined') setOnline(navigator.onLine)
@@ -146,10 +150,11 @@
         <div><strong class="block tracking-tight">会议同传提示台</strong><span class="block text-[10px] uppercase tracking-[.16em] text-slate-400">Live Interpreter Cue Desk</span></div>
       </div>
       <nav class="order-3 flex w-full gap-1 overflow-x-auto rounded-xl bg-slate-800/80 p-1 lg:order-none lg:w-auto" aria-label="工作区">
-        {#each [['live','现场传译'],['backstage','后台准备'],['terms','术语与通知'],['offline','离线暂存']] as item}
+        {#each [['live','现场传译'],['qa','播出质量抽检'],['backstage','后台准备'],['terms','术语与通知'],['offline','离线暂存']] as item}
           <button class="focus-ring whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold transition {tab === item[0] ? 'bg-white text-ink shadow' : 'text-slate-300 hover:bg-slate-700'}" aria-current={tab === item[0] ? 'page' : undefined} on:click={() => tab = item[0] as TabId}>
             {item[1]}
             {#if item[0] === 'live' && pendingCount}<span class="ml-2 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] text-white">{pendingCount}</span>{/if}
+            {#if item[0] === 'qa' && openSheet}<span class="ml-2 rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-black text-slate-900">{sheetRemaining}</span>{/if}
             {#if item[0] === 'offline' && offlineCount}<span class="ml-2 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] text-white">{offlineCount}</span>{/if}
           </button>
         {/each}
@@ -198,7 +203,7 @@
               {/each}
               {#each $desk.cues.filter(item => item.status === 'confirmed').slice(-2) as cue}
                 <div class="rounded-xl bg-white/10 p-3">
-                  <div class="mb-1 flex justify-between text-[10px] text-teal-200"><span>{speakerName($desk, cue.speakerId)}</span><span>{formatTime(cue.receivedAt)}</span></div>
+                  <div class="mb-1 flex justify-between text-[10px] text-teal-200"><span>{speakerName($desk, cue.speakerId)}</span><span>{formatTime(cue.receivedAt)}{#if cue.revised} · <strong class="text-amber-200">抽检修正稿</strong>{/if}</span></div>
                   <p class="text-base leading-relaxed lg:text-lg">{cue.text}</p>
                 </div>
               {/each}
@@ -226,8 +231,15 @@
                         <span class="rounded-md px-2 py-1 {cue.status === 'confirmed' ? 'bg-emerald-100 text-emerald-800' : cue.status === 'followup' ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-800'}">{statusLabel(cue.status)}</span>
                         {#if cue.offline}<span class="rounded-md bg-amber-100 px-2 py-1 text-amber-900">离线暂存</span>{/if}
                         {#if cue.manual}<span class="rounded-md bg-slate-100 px-2 py-1 text-slate-600">手工</span>{/if}
+                        {#if cue.revised}<span class="rounded-md bg-red-100 px-2 py-1 text-red-800">抽检已修正</span>{:else if inspectedIds.has(cue.id)}<span class="rounded-md bg-emerald-100 px-2 py-1 text-emerald-800">已抽检</span>{/if}
                       </div>
                       <p class="text-sm leading-6 lg:text-base">{cue.text}</p>
+                      {#if cue.revised && cue.originalText}
+                        <details class="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                          <summary class="cursor-pointer font-bold text-slate-600">回看播出原稿</summary>
+                          <p class="mt-1 leading-5 line-through decoration-slate-300">{cue.originalText}</p>
+                        </details>
+                      {/if}
                       {#if cue.duplicateOf}
                         <div class="mt-2 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
                           <span><strong>疑似重复：</strong>与第 {$desk.cues.findIndex(item => item.id === cue.duplicateOf) + 1} 条高度相似</span>
@@ -285,6 +297,10 @@
           </section>
         </div>
       </div>
+    {/if}
+
+    {#if tab === 'qa'}
+      <InspectionDesk />
     {/if}
 
     {#if tab === 'backstage'}
